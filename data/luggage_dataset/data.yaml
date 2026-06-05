@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 1
+names: ['luggage']
+
+roboflow:
+  workspace: roboflow-madi
+  project: airport-luggage
+  version: 1
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/roboflow-madi/airport-luggage/dataset/1
