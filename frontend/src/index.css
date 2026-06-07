@@ -1,0 +1,67 @@
+body {
+  margin: 0;
+  background:
+    radial-gradient(circle at top left, rgba(59,130,246,0.08), transparent 30%),
+    radial-gradient(circle at bottom right, rgba(14,165,233,0.08), transparent 30%),
+    linear-gradient(135deg, #020617, #0f172a, #111827);
+  font-family: Arial, sans-serif;
+  color: white;
+}
+
+a {
+  color: #cbd5e1;
+  text-decoration: none;
+  font-weight: 600;
+  transition: 0.2s;
+}
+
+a:hover {
+  color: white;
+}
+
+button {
+  padding: 14px 22px;
+  border: none;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  color: white;
+  cursor: pointer;
+  font-weight: bold;
+  transition: 0.2s;
+}
+
+button:hover {
+  transform: translateY(-2px);
+}
+
+input {
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid #334155;
+  background-color: #020617;
+  color: white;
+}
+
+.card {
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 22px;
+  padding: 26px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(10px);
+}
+
+.glowText {
+  color: #38bdf8;
+}
+
+.actionCard {
+  cursor: pointer;
+  transition: 0.25s;
+}
+
+.actionCard:hover {
+  transform: translateY(-4px);
+  border-color: rgba(148, 163, 184, 0.3);
+  box-shadow: 0 12px 25px rgba(0, 0, 0, 0.3);
+}
