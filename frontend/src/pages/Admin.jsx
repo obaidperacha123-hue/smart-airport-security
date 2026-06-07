@@ -15,7 +15,7 @@ function Admin() {
 
     const formData = new FormData();
     formData.append("name", name);
-    formData.append("file", faceImage);
+    formData.append("images", faceImage);
 
     try {
       setStatus("Sending enrolment data to backend...");

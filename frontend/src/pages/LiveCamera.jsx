@@ -1,11 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 
+const API_URL = "http://localhost:8000";
+const WS_URL = "ws://localhost:8000/ws";
+
 function LiveCamera() {
   const videoRef = useRef(null);
+  const canvasRef = useRef(null);
   const streamRef = useRef(null);
+  const socketRef = useRef(null);
 
   const [time, setTime] = useState("");
   const [backendStatus, setBackendStatus] = useState("Checking...");
+  const [detections, setDetections] = useState({
+    tracks: [],
+    faces: [],
+    alerts: [],
+  });
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -14,15 +24,20 @@ function LiveCamera() {
 
     startCamera();
     checkBackend();
+    connectWebSocket();
 
-    const backendTimer = setInterval(() => {
-      checkBackend();
-    }, 5000);
+    const backendTimer = setInterval(checkBackend, 5000);
+    const frameSender = setInterval(sendFrameToBackend, 500);
 
     return () => {
       clearInterval(timer);
       clearInterval(backendTimer);
+      clearInterval(frameSender);
       stopCamera();
+
+      if (socketRef.current) {
+        socketRef.current.close();
+      }
     };
   }, []);
 
@@ -34,7 +49,7 @@ function LiveCamera() {
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
       }
-    } catch (error) {
+    } catch {
       alert("Camera permission denied or camera not found");
     }
   }
@@ -52,7 +67,7 @@ function LiveCamera() {
 
   async function checkBackend() {
     try {
-      const response = await fetch("http://localhost:8000/health");
+      const response = await fetch(`${API_URL}/health`);
 
       if (response.ok) {
         setBackendStatus("ONLINE");
@@ -62,6 +77,123 @@ function LiveCamera() {
     } catch {
       setBackendStatus("OFFLINE");
     }
+  }
+
+  function connectWebSocket() {
+    try {
+      const socket = new WebSocket(WS_URL);
+      socketRef.current = socket;
+
+      socket.onopen = () => {
+        console.log("WebSocket connected");
+      };
+
+      socket.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+
+        if (data.error) {
+          console.log(data.error);
+          return;
+        }
+
+        setDetections({
+          tracks: data.tracks || [],
+          faces: data.faces || [],
+          alerts: data.alerts || [],
+        });
+
+        drawResults(data.tracks || [], data.faces || []);
+      };
+
+      socket.onerror = () => {
+        console.log("WebSocket error");
+      };
+
+      socket.onclose = () => {
+        console.log("WebSocket closed");
+      };
+    } catch {
+      console.log("WebSocket not connected");
+    }
+  }
+
+  function sendFrameToBackend() {
+    const video = videoRef.current;
+    const socket = socketRef.current;
+
+    if (!video || !socket || socket.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    const context = canvas.getContext("2d");
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    const imageData = canvas.toDataURL("image/jpeg", 0.7);
+    const frameBase64 = imageData.split(",")[1];
+
+    socket.send(
+      JSON.stringify({
+        frame_b64: frameBase64,
+      })
+    );
+  }
+
+  function drawResults(tracks, faces) {
+    const canvas = canvasRef.current;
+    const video = videoRef.current;
+
+    if (!canvas || !video) return;
+
+    canvas.width = video.clientWidth;
+    canvas.height = video.clientHeight;
+
+    const context = canvas.getContext("2d");
+    context.clearRect(0, 0, canvas.width, canvas.height);
+
+    const scaleX = canvas.width / video.videoWidth;
+    const scaleY = canvas.height / video.videoHeight;
+
+    tracks.forEach((track) => {
+      const box = track.bbox;
+
+      const x = box.x1 * scaleX;
+      const y = box.y1 * scaleY;
+      const width = (box.x2 - box.x1) * scaleX;
+      const height = (box.y2 - box.y1) * scaleY;
+
+      context.strokeStyle = track.is_alert ? "red" : "#38bdf8";
+      context.lineWidth = 3;
+      context.strokeRect(x, y, width, height);
+
+      context.fillStyle = track.is_alert ? "red" : "#38bdf8";
+      context.font = "16px Arial";
+      context.fillText(
+        `${track.class_name} ID: ${track.track_id}`,
+        x,
+        y - 8
+      );
+    });
+
+    faces.forEach((face) => {
+      const box = face.bbox;
+
+      const x = box.x1 * scaleX;
+      const y = box.y1 * scaleY;
+      const width = (box.x2 - box.x1) * scaleX;
+      const height = (box.y2 - box.y1) * scaleY;
+
+      context.strokeStyle = face.is_authorized ? "#22c55e" : "#f97316";
+      context.lineWidth = 3;
+      context.strokeRect(x, y, width, height);
+
+      context.fillStyle = face.is_authorized ? "#22c55e" : "#f97316";
+      context.font = "16px Arial";
+      context.fillText(face.name, x, y - 8);
+    });
   }
 
   return (
@@ -85,7 +217,13 @@ function LiveCamera() {
             <h3>{time}</h3>
           </div>
 
-          <div style={{ display: "flex", justifyContent: "center" }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              position: "relative",
+            }}
+          >
             <video
               ref={videoRef}
               autoPlay
@@ -97,6 +235,18 @@ function LiveCamera() {
                 borderRadius: "18px",
                 transform: "scaleX(-1)",
                 boxShadow: "0 10px 25px rgba(0,0,0,0.35)",
+              }}
+            />
+
+            <canvas
+              ref={canvasRef}
+              style={{
+                position: "absolute",
+                marginTop: "20px",
+                width: "760px",
+                height: "auto",
+                pointerEvents: "none",
+                transform: "scaleX(-1)",
               }}
             />
           </div>
@@ -126,35 +276,18 @@ function LiveCamera() {
           </div>
 
           <div style={statusRow}>
-            <span>Detection Engine</span>
+            <span>WebSocket</span>
             <strong
               style={{
-                color: backendStatus === "ONLINE" ? "#22c55e" : "#ef4444",
+                color:
+                  socketRef.current?.readyState === WebSocket.OPEN
+                    ? "#22c55e"
+                    : "#ef4444",
               }}
             >
-              {backendStatus}
-            </strong>
-          </div>
-
-          <div style={statusRow}>
-            <span>Tracking Engine</span>
-            <strong
-              style={{
-                color: backendStatus === "ONLINE" ? "#22c55e" : "#ef4444",
-              }}
-            >
-              {backendStatus}
-            </strong>
-          </div>
-
-          <div style={statusRow}>
-            <span>Face Recognition</span>
-            <strong
-              style={{
-                color: backendStatus === "ONLINE" ? "#22c55e" : "#ef4444",
-              }}
-            >
-              {backendStatus}
+              {socketRef.current?.readyState === WebSocket.OPEN
+                ? "CONNECTED"
+                : "DISCONNECTED"}
             </strong>
           </div>
 
@@ -164,23 +297,31 @@ function LiveCamera() {
 
           <div style={statusRow}>
             <span>Objects Detected</span>
-            <strong>0</strong>
-          </div>
-
-          <div style={statusRow}>
-            <span>Tracked Luggage</span>
-            <strong>0</strong>
+            <strong>{detections.tracks.length}</strong>
           </div>
 
           <div style={statusRow}>
             <span>Recognised Faces</span>
-            <strong>0</strong>
+            <strong>{detections.faces.length}</strong>
           </div>
 
           <div style={statusRow}>
             <span>Active Alerts</span>
-            <strong style={{ color: "#22c55e" }}>0</strong>
+            <strong
+              style={{
+                color: detections.alerts.length > 0 ? "#ef4444" : "#22c55e",
+              }}
+            >
+              {detections.alerts.length}
+            </strong>
           </div>
+
+          {detections.alerts.length > 0 && (
+            <div style={{ marginTop: "20px" }}>
+              <h3 style={{ color: "#ef4444" }}>Latest Alert</h3>
+              <p>{detections.alerts[0].message}</p>
+            </div>
+          )}
         </div>
       </div>
     </div>
