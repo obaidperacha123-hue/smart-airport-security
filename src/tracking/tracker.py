@@ -14,7 +14,7 @@ Dependencies:
 import time
 import numpy as np
 from collections import defaultdict
-from deep_sort_realtime.deepsort_tracker import DeepSort, Detection
+from deep_sort_realtime.deepsort_tracker import DeepSort
 
 # ── Config ──────────────────────────────────────────────────────────────────
 STATIONARY_THRESHOLD_SECONDS = 30   # seconds before a bag is flagged
@@ -48,15 +48,6 @@ class BagTracker:
     # Inside your frame loop:
     detections = [([x1,y1,w,h], confidence, "luggage"), ...]   # YOLO output
     tracks     = tracker.update(frame, detections)
-
-    # Each track dict:
-    # {
-    #   "track_id"   : int,
-    #   "bbox_ltrb"  : [x1,y1,x2,y2],
-    #   "stationary" : bool,
-    #   "stationary_seconds": float,
-    #   "alert"      : bool      # True when stationary > threshold
-    # }
     """
 
     def __init__(self,
@@ -65,11 +56,14 @@ class BagTracker:
                  max_age: int                = MAX_AGE):
         self.stationary_threshold = stationary_threshold
         self.iou_move_threshold   = iou_move_threshold
+        self._max_age             = max_age
 
-        # Initialize with None to pass the __init__ check, but flag it to expect external embeddings
+        # Initialize cleanly with None to pass initialization guardrails
         self._deepsort = DeepSort(max_age=max_age, embedder=None)
-        self._deepsort.tracker.metric.matching_threshold = 0.2
         
+        # Override the metric to pure IOU mode to bypass embedding verification blocks
+        self._deepsort.tracker.metric.matching_threshold = 0.2
+        self._deepsort.tracker.metric.metric = "iou"
 
         # track_id -> {"last_bbox": [...], "stationary_since": float | None}
         self._state: dict = defaultdict(lambda: {
@@ -85,35 +79,25 @@ class BagTracker:
         ----------
         frame       : BGR numpy array (the enhanced CCTV frame)
         detections  : list of ([x1,y1,w,h], confidence, class_name)
-                      – the raw output from the YOLOv8 detector
 
         Returns
         -------
-        List of track dicts (see class docstring).
+        List of track dicts.
         """
-        # Import the library's internal Detection class if not already imported at the top
+        now = time.time()
+        results = []
         detections_with_feats = []
+        
         for det in detections:
             bbox, conf, clss = det
             
-            # The library expects a clean 3-element tuple when embedder=None:
-            # ( [x, y, w, h], confidence, class_name )
+            # Format as clean 3-element tuple expected by the geometric processor loop
             native_det = (bbox, conf, clss)
             detections_with_feats.append(native_det)
 
-        # Pass the cleanly formatted list with frame=None
-        # 1. Step the internal Kalman Filters forward for all active tracks
-        self._deepsort.tracker.predict()
+        # Update the tracks using pure spatial geometry/IOU metrics
+        raw_tracks = self._deepsort.update_tracks(detections_with_feats, frame=None)
         
-        # 2. Convert your native_det tuples directly into the library's internal track formats
-        from deep_sort_realtime.structures import Detection as DS_Detection
-        cleaned_detections = [DS_Detection(d[0], d[1], None, d[2]) for d in detections_with_feats]
-        
-        # 3. Update the tracking states using pure spatial geometry/IOU, skipping the broken validation wrapper
-        self._deepsort.tracker.update(cleaned_detections)
-        
-        # 4. Pull the active tracks to match the rest of your script's logic perfectly
-        raw_tracks = self._deepsort.tracker.tracks
         for t in raw_tracks:
             if not t.is_confirmed():
                 continue
@@ -154,5 +138,6 @@ class BagTracker:
 
     def reset(self) -> None:
         """Clear all track state (call between video files)."""
-        self._deepsort = DeepSort(max_age=self._deepsort.max_age, embedder=None)
+        self._deepsort = DeepSort(max_age=self._max_age, embedder=None)
+        self._deepsort.tracker.metric.metric = "iou"
         self._state.clear()
