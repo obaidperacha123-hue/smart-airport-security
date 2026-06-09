@@ -66,7 +66,7 @@ class BagTracker:
         self.stationary_threshold = stationary_threshold
         self.iou_move_threshold   = iou_move_threshold
 
-        self._deepsort = DeepSort(max_age=max_age, embedder="gcs")
+        self._deepsort = DeepSort(max_age=max_age, embedder=None)
 
         # track_id -> {"last_bbox": [...], "stationary_since": float | None}
         self._state: dict = defaultdict(lambda: {
@@ -88,7 +88,7 @@ class BagTracker:
         -------
         List of track dicts (see class docstring).
         """
-        raw_tracks = self._deepsort.update_tracks(detections, frame=None)
+        raw_tracks = self._deepsort.update_tracks(detections, others=[])
         now        = time.time()
         results    = []
 
@@ -132,5 +132,5 @@ class BagTracker:
 
     def reset(self) -> None:
         """Clear all track state (call between video files)."""
-        self._deepsort = DeepSort(max_age=self._deepsort.max_age, embedder="gcs")
+        self._deepsort = DeepSort(max_age=self._deepsort.max_age, embedder=None)
         self._state.clear()
