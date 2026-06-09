@@ -104,7 +104,7 @@ class BagTracker:
             detections_with_feats.append(native_det)
 
         # Pass the cleanly formatted list with frame=None
-        raw_tracks = self._deepsort.update_tracks(detections_with_feats, frame=None)
+        raw_tracks = self._deepsort.update_tracks(detections_with_feats, frame=frame)
 
         for t in raw_tracks:
             if not t.is_confirmed():
