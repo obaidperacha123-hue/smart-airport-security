@@ -65,7 +65,7 @@ except ImportError:
     logger.warning("⚠  enhancement   (Member B) not found — frames pass through unenhanced")
 
 try:
-    from detection import detect_objects
+    from detection import detect_luggage
     _DETECT_OK = True
     logger.info("✓  detection     (Member B) loaded")
 except ImportError:
@@ -91,7 +91,7 @@ except ImportError:
     logger.warning("⚠  tracker       (Member C) not found — no persistent track IDs")
 
 try:
-    from face_recognition_module import InsightFaceMatcher
+    from face_recognition_module import FaceRecognizer
     _FACE_OK = True
     logger.info("✓  face_recog    (Member C) loaded")
 except ImportError:
@@ -125,7 +125,7 @@ class CVPipeline:
 
         # Stateful CV modules (instantiated once, reused across frames)
         self.tracker = BagTracker() if _TRACK_OK else None
-        self.face_matcher = InsightFaceMatcher() if _FACE_OK else None
+        self.face_matcher = FaceRecognizer() if _FACE_OK else None
         self.alert_engine = AlertEngine(    
         ) if _ALERT_OK else None
 
@@ -153,7 +153,7 @@ class CVPipeline:
         """
         if _DETECT_OK:
             try:
-                return detect_objects(frame)
+                return detect_luggage(frame)
             except Exception as exc:
                 logger.error(f"detect_objects failed: {exc}")
         return []
