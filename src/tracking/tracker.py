@@ -99,9 +99,8 @@ class BagTracker:
             # Create a 512-dimensional feature vector array
             feature_vector = np.zeros(512, dtype=np.float32)
             
-            # The library requires exactly 4 elements when embedder is active: 
-            # [bbox, confidence, class, feature]
-            native_det = (bbox, conf, clss, feature_vector)
+            # Format explicitly as a list to satisfy the library's internal type check
+            native_det = [bbox, conf, clss, feature_vector]
             detections_with_feats.append(native_det)
 
         
