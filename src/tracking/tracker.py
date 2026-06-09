@@ -14,8 +14,7 @@ Dependencies:
 import time
 import numpy as np
 from collections import defaultdict
-from deep_sort_realtime.deepsort_tracker import DeepSort
-from deep_sort_realtime.structures import Detection
+from deep_sort_realtime.deepsort_tracker import DeepSort, Detection
 
 # ── Config ──────────────────────────────────────────────────────────────────
 STATIONARY_THRESHOLD_SECONDS = 30   # seconds before a bag is flagged
