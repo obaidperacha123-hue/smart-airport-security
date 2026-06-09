@@ -92,7 +92,10 @@ class BagTracker:
         for det in detections:
             # det is ([x, y, w, h], confidence, class_name)
             bbox, conf, clss = det
-            detections_with_feats.append((bbox, conf, clss, np.zeros(0, dtype=np.float32)))
+            
+            # Provide a non-empty mock feature vector (128 dimensions)
+            mock_feature = np.ones(128, dtype=np.float32) * 0.1
+            detections_with_feats.append((bbox, conf, clss, mock_feature))
 
         raw_tracks = self._deepsort.update_tracks(detections_with_feats, frame=None)
         now        = time.time()
