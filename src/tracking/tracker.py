@@ -95,18 +95,16 @@ class BagTracker:
         List of track dicts (see class docstring).
         """
         # Import the library's internal Detection class if not already imported at the top
-        from deep_sort_realtime.structures import Detection
-
         detections_with_feats = []
         for det in detections:
             bbox, conf, clss = det
             
-            # deep_sort_realtime accepts a tuple format: (bbox, confidence, class_name)
-            # when no internal embedder is being initialized.
+            # The library expects a clean 3-element tuple when embedder=None:
+            # ( [x, y, w, h], confidence, class_name )
             native_det = (bbox, conf, clss)
             detections_with_feats.append(native_det)
 
-        # Pass the formatted list cleanly to the tracker
+        # Pass the cleanly formatted list with frame=None
         raw_tracks = self._deepsort.update_tracks(detections_with_feats, frame=None)
         results    = []
 
