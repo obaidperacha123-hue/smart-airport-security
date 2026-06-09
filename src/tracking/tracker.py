@@ -91,11 +91,16 @@ class BagTracker:
         detections_with_feats = []
         for det in detections:
             bbox, conf, clss = det
-            # DeepSORT expects: Detection(tlwh, conference, feature, class_id)
-            native_det = (bbox, conf, clss, np.zeros(512, dtype=np.float32))
+            
+            # Create a 512-dimensional array wrapped inside a list
+            # deep_sort_realtime requires the feature to be an iterable list/array of features
+            feature_vector = np.zeros(512, dtype=np.float32)
+            
+            native_det = (bbox, conf, clss, feature_vector)
             detections_with_feats.append(native_det)
 
-        raw_tracks = self._deepsort.update_tracks(detections_with_feats, frame=None, embedder_hidden=True)
+        
+        raw_tracks = self._deepsort.update_tracks(detections_with_feats, frame=None)
         results    = []
 
         for t in raw_tracks:
