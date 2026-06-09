@@ -1,278 +1,224 @@
 """
-tracker.py  –  Member C
-Object Tracking with IoU Geometry + Stationary Timer + MOG2 Background Subtraction
- 
-CV tasks implemented in this file
-----------------------------------
-  1. Object tracking        – greedy IoU-based multi-object tracker assigns
-                              persistent IDs to detected luggage bounding boxes
-  2. Background modelling   – MOG2 Gaussian Mixture Model separates foreground
-     & moving-object           (moving objects) from background; the foreground
-     detection                 mask is exposed per-frame for optional use by
-                              Member D's server and Member E's frontend overlay
- 
-Responsibilities
-----------------
-  - Initialise a per-scene background model using OpenCV's MOG2
-  - Assign persistent track IDs to luggage detections via IoU matching
-  - Time how long each bag has been stationary (IoU between consecutive
-    frames stays above IOU_MOVE_THRESHOLD)
-  - Fire an alert flag once a bag exceeds STATIONARY_THRESHOLD_SECONDS
- 
-Why IoU matching instead of DeepSORT
---------------------------------------
-  DeepSORT requires a separate appearance re-ID network (~150 MB) and
-  Kalman-filter state prediction.  For a fixed overhead CCTV camera the
-  scene is stable and bags move slowly, so greedy IoU matching is
-  sufficient and keeps the tracker dependency-free.
- 
-Dependencies
+alert_engine.py  –  Member C
+Unified Alert Engine
+
+Combines signals from BagTracker and FaceRecognizer to produce structured
+Alert objects that Member D's FastAPI server can forward to the React frontend.
+
+Alert types
+-----------
+  UNATTENDED_BAG   – bag stationary > threshold (regardless of whether owner known)
+  OWNER_LEFT       – bag's identified owner has been absent > threshold seconds
+  ACCESS_VIOLATION – face detected that is not in the enrolled personnel database
+
+Design notes
 ------------
-  pip install opencv-python numpy
+- Alerts are deduplicated: the same (track_id, alert_type) pair is only raised
+  ONCE until it has been acknowledged.  Subsequent frames update the in-place
+  counters (stationary_seconds, absent_seconds) so the frontend always shows
+  fresh values without generating duplicate events.
+- acknowledge() removes the alert from _active AND returns its final state as
+  a dict — so Member D can log it before discarding.  (Bug fix: previously the
+  acknowledged=True flag was set then immediately lost when the object was deleted.)
+- ACCESS_VIOLATION uses a monotonic negative counter for track IDs so they
+  never clash with real bag track IDs (which are always positive integers).
 """
- 
+
 import time
-import cv2
-import numpy as np
- 
- 
-# ── Config ────────────────────────────────────────────────────────────────────
-STATIONARY_THRESHOLD_SECONDS = 30    # seconds without movement → UNATTENDED alert
-IOU_MOVE_THRESHOLD           = 0.80  # IoU >= this  →  bag considered "not moved"
-MAX_AGE                      = 30    # frames before an unmatched track is pruned
-                                     # assumes ~10 FPS  →  3 s of tolerance
-                                     # increase to 90 for 30 FPS cameras
-MOG2_HISTORY                 = 500   # frames MOG2 uses to build background model
-MOG2_VAR_THRESHOLD           = 40    # pixel variance threshold for MOG2
-MOG2_DETECT_SHADOWS          = True  # mark shadow pixels grey (value 127)
-# ─────────────────────────────────────────────────────────────────────────────
- 
- 
-# ── Geometry helpers ──────────────────────────────────────────────────────────
- 
-def _to_ltrb(box: list) -> list:
+from dataclasses import dataclass, field, asdict
+from typing import Literal
+
+
+AlertType = Literal["UNATTENDED_BAG", "OWNER_LEFT", "ACCESS_VIOLATION"]
+
+
+@dataclass
+class Alert:
+    alert_type        : AlertType
+    track_id          : int
+    timestamp         : float      = field(default_factory=time.time)
+    owner             : str | None = None
+    absent_seconds    : float      = 0.0
+    stationary_seconds: float      = 0.0
+    bbox_ltrb         : list       = field(default_factory=list)
+    acknowledged      : bool       = False
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+class AlertEngine:
     """
-    Normalise a bounding box to [x1, y1, x2, y2] (left-top-right-bottom).
- 
-    Accepts either:
-      [x1, y1, x2, y2]  – already ltrb  (x2 > x1)
-      [x,  y,  w,  h]   – xywh format   (w is a size, so x+w > x)
-    """
-    x1, y1, a, b = box
-    if a <= x1 or b <= y1:           # third/fourth values are width/height
-        return [int(x1), int(y1), int(x1 + a), int(y1 + b)]
-    return [int(x1), int(y1), int(a), int(b)]
- 
- 
-def _iou(box_a: list, box_b: list) -> float:
-    """Intersection-over-Union of two bounding boxes (xywh or ltrb)."""
-    b1 = _to_ltrb(box_a)
-    b2 = _to_ltrb(box_b)
- 
-    xa = max(b1[0], b2[0]);  ya = max(b1[1], b2[1])
-    xb = min(b1[2], b2[2]);  yb = min(b1[3], b2[3])
- 
-    inter = max(0, xb - xa) * max(0, yb - ya)
-    if inter == 0:
-        return 0.0
- 
-    area_a = (b1[2] - b1[0]) * (b1[3] - b1[1])
-    area_b = (b2[2] - b2[0]) * (b2[3] - b2[1])
-    union  = area_a + area_b - inter
-    return inter / float(union) if union > 0 else 0.0
- 
- 
-# ─────────────────────────────────────────────────────────────────────────────
- 
-class BagTracker:
-    """
-    Multi-object luggage tracker with background modelling.
- 
-    Integrates two CV techniques:
-      • MOG2 background subtraction  – per-frame foreground mask
-      • Greedy IoU tracker            – persistent bag IDs + stationary timer
- 
-    Typical call sequence
-    ---------------------
-    tracker = BagTracker()
- 
+    Processes one frame's worth of tracking + face-recognition output and
+    produces new Alert objects when conditions are met.
+
+    Usage
+    -----
+    engine = AlertEngine()
+
     # once per frame:
-    bag_tracks, fg_mask = tracker.update(frame, detections)
- 
-    bag_tracks — list of dicts:
-    {
-      "track_id"           : int,
-      "bbox_ltrb"          : [x1, y1, x2, y2],
-      "stationary"         : bool,
-      "stationary_seconds" : float,
-      "alert"              : bool,   # True when stationary >= threshold
-      "fg_ratio"           : float,  # fraction of bbox covered by foreground
-    }
- 
-    fg_mask — uint8 numpy array (same H×W as frame):
-      255 = foreground  |  127 = shadow  |  0 = background
+    new_alerts = engine.process(bag_tracks, face_results, absent_alerts)
+
+    # to acknowledge (dismiss) an alert from the frontend:
+    final_state = engine.acknowledge(track_id, alert_type)
+
+    # to query what is currently active:
+    active = engine.active_alerts()
     """
- 
-    def __init__(self,
-                 stationary_threshold: float = STATIONARY_THRESHOLD_SECONDS,
-                 iou_move_threshold:   float = IOU_MOVE_THRESHOLD,
-                 max_age:              int   = MAX_AGE,
-                 mog2_history:         int   = MOG2_HISTORY,
-                 mog2_var_threshold:   float = MOG2_VAR_THRESHOLD,
-                 mog2_detect_shadows:  bool  = MOG2_DETECT_SHADOWS):
- 
-        self.stationary_threshold = stationary_threshold
-        self.iou_move_threshold   = iou_move_threshold
-        self.max_age              = max_age
- 
-        # ── MOG2 background subtractor ────────────────────────────────────
-        # BackgroundSubtractorMOG2 fits a Gaussian mixture model per pixel.
-        # It automatically adapts to slow lighting changes (ideal for CCTV).
-        self._bg_subtractor = cv2.createBackgroundSubtractorMOG2(
-            history        = mog2_history,
-            varThreshold   = mog2_var_threshold,
-            detectShadows  = mog2_detect_shadows,
-        )
- 
-        # 3×3 elliptical kernel for morphological cleanup of the fg mask
-        self._morph_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
- 
-        self.next_id = 1
-        # track_id -> {
-        #   "last_bbox"       : [x1, y1, x2, y2],
-        #   "stationary_since": float | None,
-        #   "age"             : int
-        # }
-        self._state: dict = {}
- 
-    # ── Public API ────────────────────────────────────────────────────────────
- 
-    def update(self, frame: np.ndarray, detections: list) -> tuple:
+
+    def __init__(self, detect_unknown_faces: bool = True):
         """
-        Process one frame: run MOG2, match detections to tracks, update timers.
- 
         Parameters
         ----------
-        frame      : BGR numpy array — the enhanced CCTV frame from Member B
-        detections : list of  ([x, y, w, h], confidence, class_name)
-                     format returned by Member B's LuggageDetector
- 
+        detect_unknown_faces : set False to disable ACCESS_VIOLATION alerts
+                               (e.g. in public areas where unknown faces are expected)
+        """
+        self.detect_unknown_faces = detect_unknown_faces
+        # (track_id, alert_type) -> Alert
+        self._active: dict[tuple, Alert] = {}
+        # Monotonic counter for ACCESS_VIOLATION pseudo track IDs.
+        # Always negative so they never collide with real bag track IDs.
+        self._violation_counter = 0
+
+    # ── Main entry point ──────────────────────────────────────────────────────
+
+    def process(self,
+                bag_tracks:    list,
+                face_results:  list,
+                absent_alerts: list) -> list:
+        """
+        Call once per frame with the outputs of BagTracker and FaceRecognizer.
+
+        Parameters
+        ----------
+        bag_tracks    : output of BagTracker.update()
+        face_results  : output of FaceRecognizer.process_frame()
+        absent_alerts : output of FaceRecognizer.get_owner_absent_alerts()
+
         Returns
         -------
-        (bag_tracks, fg_mask)
-          bag_tracks : list of track dicts (see class docstring)
-          fg_mask    : uint8 H×W foreground mask from MOG2
+        List of *new* Alert objects raised this frame (may be empty).
+        Alerts that were already active are updated in-place, not re-raised.
         """
-        now = time.time()
- 
-        # ── Step 1: Background subtraction (MOG2) ────────────────────────
-        # Apply MOG2 to the raw frame.  Returns a mask where:
-        #   255 = foreground pixel (recently appeared / moving)
-        #   127 = shadow pixel (darker than background but same structure)
-        #     0 = background pixel
-        fg_mask_raw = self._bg_subtractor.apply(frame)
- 
-        # Clean up noise with morphological opening (erode then dilate).
-        # This removes small spurious foreground blobs (compression artefacts,
-        # minor lighting flicker) while keeping large moving objects intact.
-        fg_mask = cv2.morphologyEx(
-            fg_mask_raw, cv2.MORPH_OPEN, self._morph_kernel
-        )
- 
-        # ── Step 2: Age all existing tracks ──────────────────────────────
-        for tid in list(self._state.keys()):
-            self._state[tid]["age"] += 1
- 
-        matched_tracks: set = set()
-        results: list       = []
- 
-        # ── Step 3: Match detections to tracks (greedy IoU) ──────────────
-        for det in detections:
-            bbox_xywh, _conf, _cls = det
-            x, y, w, h = bbox_xywh
-            ltrb = [int(x), int(y), int(x + w), int(y + h)]
- 
-            best_id  = None
-            best_iou = 0.3      # minimum IoU to accept a match
- 
-            for tid, track in self._state.items():
-                if tid in matched_tracks:
-                    continue
-                overlap = _iou(track["last_bbox"], ltrb)
-                if overlap > best_iou:
-                    best_iou = overlap
-                    best_id  = tid
- 
-            if best_id is not None:
-                # ── Update existing track ─────────────────────────────
-                matched_tracks.add(best_id)
-                s        = self._state[best_id]
-                s["age"] = 0
- 
-                iou_same = _iou(s["last_bbox"], ltrb)
-                if iou_same >= self.iou_move_threshold:
-                    if s["stationary_since"] is None:
-                        s["stationary_since"] = now
+        new_alerts: list[Alert] = []
+
+        # Build a quick-lookup set of active bag track IDs for cleanup below
+        active_track_ids = {t["track_id"] for t in bag_tracks}
+
+        # ── 1. UNATTENDED_BAG ─────────────────────────────────────────────
+        for track in bag_tracks:
+            tid = track["track_id"]
+            if track["alert"]:
+                key = (tid, "UNATTENDED_BAG")
+                if key not in self._active:
+                    alert = Alert(
+                        alert_type         = "UNATTENDED_BAG",
+                        track_id           = tid,
+                        stationary_seconds = track["stationary_seconds"],
+                        bbox_ltrb          = track["bbox_ltrb"],
+                    )
+                    self._active[key] = alert
+                    new_alerts.append(alert)
                 else:
-                    s["stationary_since"] = None   # bag moved → reset timer
- 
-                s["last_bbox"] = ltrb
-                track_id = best_id
+                    # Update live counter without re-raising
+                    self._active[key].stationary_seconds = track["stationary_seconds"]
+                    self._active[key].bbox_ltrb          = track["bbox_ltrb"]
+
+        # ── 2. OWNER_LEFT ─────────────────────────────────────────────────
+        # Build a set of track IDs that currently have an absent-owner alert
+        absent_tids = {a["track_id"] for a in absent_alerts}
+
+        for absent in absent_alerts:
+            tid = absent["track_id"]
+            key = (tid, "OWNER_LEFT")
+            if key not in self._active:
+                alert = Alert(
+                    alert_type     = "OWNER_LEFT",
+                    track_id       = tid,
+                    owner          = absent["owner"],
+                    absent_seconds = absent["absent_seconds"],
+                )
+                # Attach the bag's current bounding box if still tracked
+                for t in bag_tracks:
+                    if t["track_id"] == tid:
+                        alert.bbox_ltrb = t["bbox_ltrb"]
+                        break
+                self._active[key] = alert
+                new_alerts.append(alert)
             else:
-                # ── New track ──────────────────────────────────────────
-                track_id = self.next_id
-                self.next_id += 1
-                self._state[track_id] = {
-                    "last_bbox"       : ltrb,
-                    "stationary_since": None,
-                    "age"             : 0,
-                }
- 
-            # ── Compute fg_ratio for this bounding box ────────────────
-            # Fraction of the bbox area covered by foreground pixels.
-            # A high fg_ratio (> 0.3) confirms the object is genuinely
-            # present in the foreground and not a ghost detection.
-            x1, y1, x2, y2 = ltrb
-            # Clamp to frame dimensions
-            fh, fw = frame.shape[:2]
-            rx1 = max(0, x1);  ry1 = max(0, y1)
-            rx2 = min(fw, x2); ry2 = min(fh, y2)
-            roi = fg_mask[ry1:ry2, rx1:rx2]
-            if roi.size > 0:
-                fg_ratio = float(np.count_nonzero(roi)) / roi.size
-            else:
-                fg_ratio = 0.0
- 
-            s = self._state[track_id]
-            stationary_secs = (
-                (now - s["stationary_since"])
-                if s["stationary_since"] is not None else 0.0
-            )
- 
-            results.append({
-                "track_id"           : track_id,
-                "bbox_ltrb"          : ltrb,
-                "stationary"         : s["stationary_since"] is not None,
-                "stationary_seconds" : round(stationary_secs, 1),
-                "alert"              : stationary_secs >= self.stationary_threshold,
-                "fg_ratio"           : round(fg_ratio, 3),
-            })
- 
-        # ── Step 4: Prune stale tracks ────────────────────────────────────
-        self._state = {
-            tid: s
-            for tid, s in self._state.items()
-            if s["age"] <= self.max_age
-        }
- 
-        return results, fg_mask
- 
-    def reset(self) -> None:
-        """Clear all tracks, reset ID counter, and reinitialise the MOG2 model."""
-        self._state.clear()
-        self.next_id = 1
-        self._bg_subtractor = cv2.createBackgroundSubtractorMOG2(
-            history      = MOG2_HISTORY,
-            varThreshold = MOG2_VAR_THRESHOLD,
-            detectShadows= MOG2_DETECT_SHADOWS,
-        )
+                # Update live counter without re-raising
+                self._active[key].absent_seconds = absent["absent_seconds"]
+
+        # ── 3. ACCESS_VIOLATION ───────────────────────────────────────────
+        # One alert per unique unknown-face bounding box position per session.
+        # A face moving slightly across frames generates a new alert (acceptable
+        # behaviour — it means the unknown person is still present and moving).
+        if self.detect_unknown_faces:
+            for fr in face_results:
+                if fr["identity"] is None:
+                    bbox_key = tuple(fr["bbox_ltrb"])
+                    # Check for a spatially identical active violation
+                    already_active = any(
+                        tuple(a.bbox_ltrb) == bbox_key
+                        for (_, atype), a in self._active.items()
+                        if atype == "ACCESS_VIOLATION"
+                    )
+                    if not already_active:
+                        self._violation_counter += 1
+                        pseudo_tid = -self._violation_counter   # always negative
+                        key = (pseudo_tid, "ACCESS_VIOLATION")
+                        alert = Alert(
+                            alert_type = "ACCESS_VIOLATION",
+                            track_id   = pseudo_tid,
+                            bbox_ltrb  = list(bbox_key),
+                        )
+                        self._active[key] = alert
+                        new_alerts.append(alert)
+
+        # ── 4. Cleanup stale alerts ───────────────────────────────────────
+        # • OWNER_LEFT  – clear if FaceRecognizer no longer reports the owner absent
+        #   (owner came back, or bag was removed).
+        # • UNATTENDED_BAG – clear if the bag track has disappeared from the scene
+        #   (bag was picked up or tracker pruned it).
+        # We iterate over a snapshot of keys to safely modify _active inside the loop.
+        for key in list(self._active.keys()):
+            tid, atype = key
+            if atype == "OWNER_LEFT" and tid not in absent_tids:
+                del self._active[key]
+            elif atype == "UNATTENDED_BAG" and tid not in active_track_ids:
+                del self._active[key]
+
+        return new_alerts
+
+    # ── Alert management ──────────────────────────────────────────────────────
+
+    def acknowledge(self, track_id: int, alert_type: AlertType) -> dict | None:
+        """
+        Dismiss an active alert.
+
+        Sets acknowledged=True on the Alert object, removes it from the active
+        table, and returns its final state as a dict so Member D can log it.
+
+        For OWNER_LEFT alerts: the caller should also call
+        face_rec.reset_ownership(track_id) so the owner can be re-associated
+        with their bag if they return to the scene.
+
+        Returns
+        -------
+        The final alert dict (with acknowledged=True), or None if the alert
+        was not found (e.g. already auto-cleared by step 4 above).
+        """
+        key = (track_id, alert_type)
+        if key not in self._active:
+            return None
+        alert = self._active.pop(key)    # remove from active table
+        alert.acknowledged = True        # mark AFTER removing, on the live object
+        return alert.to_dict()           # return final state for Member D to log
+
+    def active_alerts(self) -> list:
+        """Return all current un-acknowledged alerts as a list of dicts."""
+        return [a.to_dict() for a in self._active.values()]
+
+    def clear_all(self) -> None:
+        """Remove all active alerts (e.g. on scene reset or end of shift)."""
+        self._active.clear()
