@@ -106,7 +106,11 @@ class BagTracker:
             native_det = [bbox, conf, clss, feature_vector]
             detections_with_feats.append(native_det)
         
-        raw_tracks = self._deepsort.update_tracks(detections_with_feats, frame=None)
+        # Extract the features into a separate parallel list for the library's verification parameter
+        custom_embeddings = [det[3] for det in detections_with_feats]
+
+        # Pass the embeddings list explicitly via the keyword argument to clear the check completely
+        raw_tracks = self._deepsort.update_tracks(detections_with_feats, frame=None, embeddings=custom_embeddings)
         results    = []
 
         for t in raw_tracks:
