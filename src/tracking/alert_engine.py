@@ -7,9 +7,9 @@ Alert objects that Member D's FastAPI server can forward to the React frontend.
 
 Alert types
 -----------
-  UNATTENDED_BAG   : bag stationary > threshold (regardless of whether owner known)
-  OWNER_LEFT       : bag's identified owner has been absent > threshold seconds
-  ACCESS_VIOLATION : face detected that is not in the enrolled personnel database
+  UNATTENDED_BAG   – bag stationary > threshold (regardless of whether owner known)
+  OWNER_LEFT       – bag's identified owner has been absent > threshold seconds
+  ACCESS_VIOLATION – face detected that is not in the enrolled personnel database
 
 Design notes
 ------------
@@ -175,13 +175,17 @@ class AlertEngine:
                         self._active[key] = alert
                         new_alerts.append(alert)
 
-        # ── 4. Cleanup stale OWNER_LEFT alerts ────────────────────────────
-        # If the absent-owner alert is no longer being reported by FaceRecognizer
-        # (e.g. the owner came back, or the bag was removed), clear it automatically.
+        # ── 4. Cleanup stale alerts ───────────────────────────────────────
+        # • OWNER_LEFT  – clear if FaceRecognizer no longer reports the owner absent
+        #   (owner came back, or bag was removed).
+        # • UNATTENDED_BAG – clear if the bag track has disappeared from the scene
+        #   (bag was picked up or tracker pruned it).
         # We iterate over a snapshot of keys to safely modify _active inside the loop.
         for key in list(self._active.keys()):
             tid, atype = key
             if atype == "OWNER_LEFT" and tid not in absent_tids:
+                del self._active[key]
+            elif atype == "UNATTENDED_BAG" and tid not in active_track_ids:
                 del self._active[key]
 
         return new_alerts
