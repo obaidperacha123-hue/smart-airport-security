@@ -95,8 +95,7 @@ class BagTracker:
             native_det = (bbox, conf, clss, np.zeros(512, dtype=np.float32))
             detections_with_feats.append(native_det)
 
-        raw_tracks = self._deepsort.update_tracks(detections_with_feats, frame=None)
-        now        = time.time()
+        raw_tracks = self._deepsort.update_tracks(detections_with_feats, frame=None, embedder_hidden=True)
         results    = []
 
         for t in raw_tracks:
