@@ -92,11 +92,11 @@ class BagTracker:
         for det in detections:
             bbox, conf, clss = det
             
-            # Create a 512-dimensional array wrapped inside a list
-            # deep_sort_realtime requires the feature to be an iterable list/array of features
+            # Create a 512-dimensional feature vector array
             feature_vector = np.zeros(512, dtype=np.float32)
             
-            native_det = (bbox, conf, clss, feature_vector)
+            # Provide exactly 3 elements: (bounding_box, confidence, feature)
+            native_det = (bbox, conf, feature_vector)
             detections_with_feats.append(native_det)
 
         
