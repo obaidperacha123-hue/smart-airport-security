@@ -129,7 +129,7 @@ class BagTracker:
             is_alert = stationary_secs >= self.stationary_threshold
 
             results.append({
-                "track_id"           : track_id,
+                "track_id"           : int(abs(track_id) % 10000), # Keeps IDs clean, positive, and small for the alert logger
                 "bbox_ltrb"          : ltrb,
                 "stationary"         : is_stationary,
                 "stationary_seconds" : round(stationary_secs, 1),
