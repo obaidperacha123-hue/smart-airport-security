@@ -92,7 +92,7 @@ class BagTracker:
         for det in detections:
             bbox, conf, clss = det
             # DeepSORT expects: Detection(tlwh, conference, feature, class_id)
-            native_det = Detection(bbox, conf, np.ones(128, dtype=np.float32) * 0.1, clss)
+            native_det = Detection(bbox, conf, np.zeros(512, dtype=np.float32), clss)
             detections_with_feats.append(native_det)
 
         raw_tracks = self._deepsort.update_tracks(detections_with_feats, frame=None)
