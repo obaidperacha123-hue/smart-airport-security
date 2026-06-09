@@ -100,7 +100,7 @@ class BagTracker:
             detections_with_feats.append(native_det)
 
         
-        raw_tracks = self._deepsort.update_tracks(detections_with_feats, frame=None)
+        raw_tracks = self._deepsort.update_tracks(detections_with_feats, frame=None, embedder=lambda img: [])
         results    = []
 
         for t in raw_tracks:
