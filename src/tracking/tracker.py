@@ -66,7 +66,7 @@ class BagTracker:
         self.stationary_threshold = stationary_threshold
         self.iou_move_threshold   = iou_move_threshold
 
-        self._deepsort = DeepSort(max_age=max_age)
+        self._deepsort = DeepSort(max_age=max_age, embedder=None)
 
         # track_id -> {"last_bbox": [...], "stationary_since": float | None}
         self._state: dict = defaultdict(lambda: {
