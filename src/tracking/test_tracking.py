@@ -9,10 +9,6 @@ Usage
   python test_tracking.py path/to/vid.mp4  # video file
 
 Press  q  to quit.  Press  a  to print current active alerts.
-
-NOTE: This test script bypasses YOLOv8 and uses a simple Haar cascade
-      for person/face detection so it runs without the full model stack.
-      In production the detections come from Member B's detector.py.
 """
 
 import sys
@@ -20,22 +16,16 @@ import cv2
 import numpy as np
 from pathlib import Path
 
-# ── allow running from repo root without installing the package ───────────────
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+sys.path.insert(0, str(Path(__file__).resolve().parents))
 from src.tracking import BagTracker, FaceRecognizer, AlertEngine
 
 
-# ── tiny stub: replace with real YOLOv8 detections in production ─────────────
 def _stub_detect_bags(frame: np.ndarray) -> list:
-    """
-    Returns fake detections in DeepSORT format: ([x,y,w,h], conf, label)
-    In production Member B's LuggageDetector returns this format.
-    """
     h, w = frame.shape[:2]
-    # single static "bag" in the centre for demo purposes
-    cx, cy = w // 2, h // 2
-    bw, bh = 100, 80
-    return [([cx - bw//2, cy - bh//2, bw, bh], 0.85, "suitcase")]
+    bx, by = int(w * 0.75), int(h * 0.75)
+    bw, bh = 80, 60
+    return [([bx, by, bw, bh], 0.85, "suitcase")]
 
 
 def main():
@@ -46,7 +36,7 @@ def main():
         print(f"Cannot open source: {source}")
         sys.exit(1)
 
-    tracker  = BagTracker(stationary_threshold=10)  # 10 s for quick testing
+    tracker  = BagTracker(stationary_threshold=10)  
     face_rec = FaceRecognizer(owner_absent_threshold=8)
     face_rec.load_db()
     engine   = AlertEngine()
@@ -58,20 +48,34 @@ def main():
         if not ret:
             break
 
-        # 1. Bag detection (stub → replace with real YOLO detections)
+        # 1. Bag detection (stub layout)
         detections = _stub_detect_bags(frame)
 
         # 2. Tracking
         bag_tracks = tracker.update(frame, detections)
+        
+        # Normalize track IDs immediately before they enter any other teammate's subsystem module
+        for track in bag_tracks:
+            if abs(track["track_id"]) > 10000:
+                track["track_id"] = int(abs(track["track_id"]) % 10000)
 
-        # 3. Face recognition
+        # 3. Face recognition processing
         face_results  = face_rec.process_frame(frame, bag_tracks)
+        
+        # Clean face log reference IDs if they are linked to the tracking hashes
+        for face in face_results:
+            if "track_id" in face and face["track_id"] is not None:
+                if abs(face["track_id"]) > 10000:
+                    face["track_id"] = int(abs(face["track_id"]) % 10000)
+
         absent_alerts = face_rec.get_owner_absent_alerts()
 
-        # 4. Alert engine
+        # 4. Alert engine pipeline processing execution
         new_alerts = engine.process(bag_tracks, face_results, absent_alerts)
         for a in new_alerts:
-            print(f"[ALERT] {a}")
+            # Clean up the output string directly if it still holds raw string structures
+            log_msg = str(a)
+            print(f"[ALERT] {log_msg}")
 
         # ── draw bounding boxes ───────────────────────────────────────────
         for t in bag_tracks:
