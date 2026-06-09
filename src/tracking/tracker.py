@@ -68,7 +68,6 @@ class BagTracker:
 
         # Initialize with None to pass the __init__ check, but flag it to expect external embeddings
         self._deepsort = DeepSort(max_age=max_age, embedder=None)
-        self._deepsort.embedder = True
 
         self._deepsort.tracker.metric.matching_threshold = 0.2
         # Manually set the embedder flag to True internally so update_tracks doesn't throw an error
@@ -106,7 +105,6 @@ class BagTracker:
 
         # Pass the cleanly formatted list with frame=None
         raw_tracks = self._deepsort.update_tracks(detections_with_feats, frame=None)
-        results    = []
 
         for t in raw_tracks:
             if not t.is_confirmed():
