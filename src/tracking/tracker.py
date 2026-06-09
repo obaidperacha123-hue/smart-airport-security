@@ -68,10 +68,8 @@ class BagTracker:
 
         # Initialize with None to pass the __init__ check, but flag it to expect external embeddings
         self._deepsort = DeepSort(max_age=max_age, embedder=None)
-
         self._deepsort.tracker.metric.matching_threshold = 0.2
-        # Manually set the embedder flag to True internally so update_tracks doesn't throw an error
-        self._deepsort.embedder = True
+        
 
         # track_id -> {"last_bbox": [...], "stationary_since": float | None}
         self._state: dict = defaultdict(lambda: {
