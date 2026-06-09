@@ -15,6 +15,7 @@ import time
 import numpy as np
 from collections import defaultdict
 from deep_sort_realtime.deepsort_tracker import DeepSort
+from deep_sort_realtime.structures import Detection
 
 # ── Config ──────────────────────────────────────────────────────────────────
 STATIONARY_THRESHOLD_SECONDS = 30   # seconds before a bag is flagged
@@ -90,12 +91,10 @@ class BagTracker:
         """
         detections_with_feats = []
         for det in detections:
-            # det is ([x, y, w, h], confidence, class_name)
             bbox, conf, clss = det
-            
-            # Provide a non-empty mock feature vector (128 dimensions)
-            mock_feature = np.ones(128, dtype=np.float32) * 0.1
-            detections_with_feats.append((bbox, conf, clss, mock_feature))
+            # DeepSORT expects: Detection(tlwh, conference, feature, class_id)
+            native_det = Detection(bbox, conf, np.ones(128, dtype=np.float32) * 0.1, clss)
+            detections_with_feats.append(native_det)
 
         raw_tracks = self._deepsort.update_tracks(detections_with_feats, frame=None)
         now        = time.time()
