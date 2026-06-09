@@ -101,14 +101,12 @@ class BagTracker:
         for det in detections:
             bbox, conf, clss = det
             
-            # Create a 512-dimensional feature vector array
-            feature_vector = np.zeros(512, dtype=np.float32)
-            
-            # Create a native Detection object that the library natively unpacks
-            native_det = Detection(bbox, conf, feature_vector, clss)
+            # deep_sort_realtime accepts a tuple format: (bbox, confidence, class_name)
+            # when no internal embedder is being initialized.
+            native_det = (bbox, conf, clss)
             detections_with_feats.append(native_det)
 
-        # Pass the clean list with frame=None, with no unexpected keyword arguments
+        # Pass the formatted list cleanly to the tracker
         raw_tracks = self._deepsort.update_tracks(detections_with_feats, frame=None)
         results    = []
 
