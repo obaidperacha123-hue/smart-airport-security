@@ -102,8 +102,18 @@ class BagTracker:
             detections_with_feats.append(native_det)
 
         # Pass the cleanly formatted list with frame=None
-        raw_tracks = self._deepsort.update_tracks(detections_with_feats, frame=frame)
-
+        # 1. Step the internal Kalman Filters forward for all active tracks
+        self._deepsort.tracker.predict()
+        
+        # 2. Convert your native_det tuples directly into the library's internal track formats
+        from deep_sort_realtime.structures import Detection as DS_Detection
+        cleaned_detections = [DS_Detection(d[0], d[1], None, d[2]) for d in detections_with_feats]
+        
+        # 3. Update the tracking states using pure spatial geometry/IOU, skipping the broken validation wrapper
+        self._deepsort.tracker.update(cleaned_detections)
+        
+        # 4. Pull the active tracks to match the rest of your script's logic perfectly
+        raw_tracks = self._deepsort.tracker.tracks
         for t in raw_tracks:
             if not t.is_confirmed():
                 continue
