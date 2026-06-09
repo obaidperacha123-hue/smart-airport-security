@@ -68,6 +68,8 @@ class BagTracker:
 
         # Initialize with None to pass the __init__ check, but flag it to expect external embeddings
         self._deepsort = DeepSort(max_age=max_age, embedder=None)
+        self._deepsort.embedder = True
+
         self._deepsort.tracker.metric.matching_threshold = 0.2
         # Manually set the embedder flag to True internally so update_tracks doesn't throw an error
         self._deepsort.embedder = True
@@ -99,14 +101,9 @@ class BagTracker:
             # Create a 512-dimensional feature vector array
             feature_vector = np.zeros(512, dtype=np.float32)
             
-            # Use a dictionary structure with explicit keys, which deep_sort_realtime's 
-            # internal parser handles cleanly when extracting custom embeddings
-            native_det = {
-                "bbox": bbox,
-                "confidence": conf,
-                "class": clss,
-                "feature": feature_vector
-            }
+            # Must be a 4-item list: [bbox, confidence, class, feature_vector]
+            # feature_vector MUST be a numpy array at the end for the library to parse it
+            native_det = [bbox, conf, clss, feature_vector]
             detections_with_feats.append(native_det)
         
         raw_tracks = self._deepsort.update_tracks(detections_with_feats, frame=None)
