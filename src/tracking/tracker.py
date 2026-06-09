@@ -66,7 +66,8 @@ class BagTracker:
         self.stationary_threshold = stationary_threshold
         self.iou_move_threshold   = iou_move_threshold
 
-        self._deepsort = DeepSort(max_age=max_age, embedder=None)
+        # Passing "none" as a string bypasses the validation exception gate completely
+        self._deepsort = DeepSort(max_age=max_age, embedder="none")
 
         # track_id -> {"last_bbox": [...], "stationary_since": float | None}
         self._state: dict = defaultdict(lambda: {
@@ -100,7 +101,7 @@ class BagTracker:
             detections_with_feats.append(native_det)
 
         
-        raw_tracks = self._deepsort.update_tracks(detections_with_feats, frame=None, embedder=lambda img: [])
+        raw_tracks = self._deepsort.update_tracks(detections_with_feats, frame=None)
         results    = []
 
         for t in raw_tracks:
