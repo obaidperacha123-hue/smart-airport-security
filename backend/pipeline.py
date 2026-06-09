@@ -83,7 +83,7 @@ except ImportError:
 # ── Member C — import with graceful fallback ──────────────────────────────────
 
 try:
-    from tracker import DeepSORTTracker, update_tracks
+    from tracker import BagTracker
     _TRACK_OK = True
     logger.info("✓  tracker       (Member C) loaded")
 except ImportError:
@@ -124,10 +124,9 @@ class CVPipeline:
         self._frame_counter = 0
 
         # Stateful CV modules (instantiated once, reused across frames)
-        self.tracker = DeepSORTTracker() if _TRACK_OK else None
+        self.tracker = BagTracker() if _TRACK_OK else None
         self.face_matcher = InsightFaceMatcher() if _FACE_OK else None
-        self.alert_engine = AlertEngine(
-            stationary_threshold_seconds=STATIONARY_THRESHOLD
+        self.alert_engine = AlertEngine(    
         ) if _ALERT_OK else None
 
         logger.info("CVPipeline ready")
@@ -169,7 +168,7 @@ class CVPipeline:
         """
         if _TRACK_OK and self.tracker is not None:
             try:
-                raw = update_tracks(self.tracker, detections, frame)
+                raw = self.tracker.update(frame, detections)
                 return [
                     TrackedObject(
                         track_id=t["id"],
@@ -246,7 +245,7 @@ class CVPipeline:
         """
         if _ALERT_OK and self.alert_engine is not None:
             try:
-                return self.alert_engine.evaluate(tracks, faces, frame)
+                return self.alert_engine.process(tracks, faces, [])
             except Exception as exc:
                 logger.error(f"alert_engine.evaluate failed: {exc}")
 
