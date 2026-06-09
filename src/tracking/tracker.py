@@ -88,7 +88,13 @@ class BagTracker:
         -------
         List of track dicts (see class docstring).
         """
-        raw_tracks = self._deepsort.update_tracks(detections, others=[])
+        detections_with_feats = []
+        for det in detections:
+            # det is ([x, y, w, h], confidence, class_name)
+            bbox, conf, clss = det
+            detections_with_feats.append((bbox, conf, clss, np.zeros(0, dtype=np.float32)))
+
+        raw_tracks = self._deepsort.update_tracks(detections_with_feats, frame=None)
         now        = time.time()
         results    = []
 
