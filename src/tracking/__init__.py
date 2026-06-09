@@ -1,4 +1,5 @@
-"""src/tracking  –  Member C
+"""
+src/tracking  –  Member C
 Public exports for the tracking + face recognition + alert subsystem.
 Consumed by Member D's FastAPI server (server.py).
 """
