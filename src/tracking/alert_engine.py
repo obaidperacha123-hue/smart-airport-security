@@ -7,9 +7,9 @@ Alert objects that Member D's FastAPI server can forward to the React frontend.
 
 Alert types
 -----------
-  UNATTENDED_BAG   – bag stationary > threshold (regardless of whether owner known)
-  OWNER_LEFT       – bag's identified owner has been absent > threshold seconds
-  ACCESS_VIOLATION – face detected that is not in the enrolled personnel database
+  UNATTENDED_BAG   : bag stationary > threshold (regardless of whether owner known)
+  OWNER_LEFT       : bag's identified owner has been absent > threshold seconds
+  ACCESS_VIOLATION : face detected that is not in the enrolled personnel database
 
 Design notes
 ------------
