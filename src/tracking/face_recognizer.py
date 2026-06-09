@@ -227,4 +227,4 @@ class FaceRecognizer:
                 best_sim, best_name = avg, name
         if best_sim >= self.recognition_threshold:
             return best_name, best_sim
-        return None, best_sim
+        return None, best_sim  
