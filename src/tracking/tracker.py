@@ -13,26 +13,28 @@ Dependencies:
 
 import time
 import numpy as np
-from collections import defaultdict
-
-# ── Config ──────────────────────────────────────────────────────────────────
-STATIONARY_THRESHOLD_SECONDS = 30   # seconds before a bag is flagged
-IOU_MOVE_THRESHOLD           = 0.80 # IoU > this means "bag hasn't moved"
-MAX_AGE                      = 30   # frames a track survives without a match
-# ─────────────────────────────────────────────────────────────────────────────
 
 
+STATIONARY_THRESHOLD_SECONDS = 30   
+IOU_MOVE_THRESHOLD           = 0.80 
+MAX_AGE                      = 30   
+
+def _ltrb(box: list) -> list:
+    x1, y1, a, b = box
+    if a <= x1 or b <= y1:
+        return [int(x1), int(y1), int(x1 + a), int(y1 + b)]
+    return [int(x1), int(y1), int(a), int(b)]
+ 
+ 
 def _iou(box_a: list, box_b: list) -> float:
-    """Intersection-over-Union for two [x1,y1,x2,y2] boxes or [x,y,w,h] conversion."""
-    # Ensure formats match: if box has width/height instead of right/bottom, convert it
-    b1 = [box_a[0], box_a[1], box_a[0] + box_a[2], box_a[1] + box_a[3]] if len(box_a) == 4 and box_a[2] < box_a[0] else box_a
-    b2 = [box_b[0], box_b[1], box_b[0] + box_b[2], box_b[1] + box_b[3]] if len(box_b) == 4 and box_b[2] < box_b[0] else box_b
-    
+    b1 = _ltrb(box_a)
+    b2 = _ltrb(box_b)
+ 
     xa = max(b1[0], b2[0])
     ya = max(b1[1], b2[1])
     xb = min(b1[2], b2[2])
     yb = min(b1[3], b2[3])
-    
+ 
     inter = max(0, xb - xa) * max(0, yb - ya)
     if inter == 0:
         return 0.0
@@ -42,9 +44,6 @@ def _iou(box_a: list, box_b: list) -> float:
 
 
 class BagTracker:
-    """
-    Maintains persistent IDs across video frames via IoU and handles stationarity timers.
-    """
 
     def __init__(self,
                  stationary_threshold: float = STATIONARY_THRESHOLD_SECONDS,
@@ -113,7 +112,7 @@ class BagTracker:
                 s["last_bbox"] = ltrb
                 track_id = best_id
             else:
-                # Spawn a completely new persistent Track ID
+                
                 track_id = self.next_id
                 self.next_id += 1
                 self._state[track_id] = {
@@ -122,26 +121,23 @@ class BagTracker:
                     "age": 0
                 }
             
-            # 3. Calculate metrics for active tracks
             s = self._state[track_id]
             stationary_secs = (now - s["stationary_since"]) if s["stationary_since"] is not None else 0.0
             is_stationary = s["stationary_since"] is not None
             is_alert = stationary_secs >= self.stationary_threshold
 
             results.append({
-                "track_id"           : int(abs(track_id) % 10000), # Keeps IDs clean, positive, and small for the alert logger
+                "track_id"           : track_id,
                 "bbox_ltrb"          : ltrb,
                 "stationary"         : is_stationary,
                 "stationary_seconds" : round(stationary_secs, 1),
                 "alert"              : is_alert,
             })
 
-        # 4. Evict expired tracking entities that haven't been matched within MAX_AGE
         self._state = {tid: s for tid, s in self._state.items() if s["age"] <= self.max_age}
 
         return results
 
     def reset(self) -> None:
-        """Clear all active tracks."""
         self._state.clear()
         self.next_id = 1
