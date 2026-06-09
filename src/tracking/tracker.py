@@ -94,6 +94,9 @@ class BagTracker:
         -------
         List of track dicts (see class docstring).
         """
+        # Import the library's internal Detection class if not already imported at the top
+        from deep_sort_realtime.structures import Detection
+
         detections_with_feats = []
         for det in detections:
             bbox, conf, clss = det
@@ -101,16 +104,12 @@ class BagTracker:
             # Create a 512-dimensional feature vector array
             feature_vector = np.zeros(512, dtype=np.float32)
             
-            # Must be a 4-item list: [bbox, confidence, class, feature_vector]
-            # feature_vector MUST be a numpy array at the end for the library to parse it
-            native_det = [bbox, conf, clss, feature_vector]
+            # Create a native Detection object that the library natively unpacks
+            native_det = Detection(bbox, conf, feature_vector, clss)
             detections_with_feats.append(native_det)
-        
-        # Extract the features into a separate parallel list for the library's verification parameter
-        custom_embeddings = [det[3] for det in detections_with_feats]
 
-        # Pass the embeddings list explicitly via the keyword argument to clear the check completely
-        raw_tracks = self._deepsort.update_tracks(detections_with_feats, frame=None, embeddings=custom_embeddings)
+        # Pass the clean list with frame=None, with no unexpected keyword arguments
+        raw_tracks = self._deepsort.update_tracks(detections_with_feats, frame=None)
         results    = []
 
         for t in raw_tracks:
