@@ -99,10 +99,15 @@ class BagTracker:
             # Create a 512-dimensional feature vector array
             feature_vector = np.zeros(512, dtype=np.float32)
             
-            # Format explicitly as a list to satisfy the library's internal type check
-            native_det = [bbox, conf, clss, feature_vector]
+            # Use a dictionary structure with explicit keys, which deep_sort_realtime's 
+            # internal parser handles cleanly when extracting custom embeddings
+            native_det = {
+                "bbox": bbox,
+                "confidence": conf,
+                "class": clss,
+                "feature": feature_vector
+            }
             detections_with_feats.append(native_det)
-
         
         raw_tracks = self._deepsort.update_tracks(detections_with_feats, frame=None)
         results    = []
