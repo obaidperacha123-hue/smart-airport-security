@@ -17,5 +17,4 @@ results = model.train(
     mosaic=1.0,
 )
 
-print("Training complete! Best weights saved to:", results.save_dir)
 print("Training complete. Best weights saved to:", results.save_dir)

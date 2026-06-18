@@ -119,3 +119,15 @@ if __name__ == "__main__":
     annotated = draw_detections(enhanced, detections)
     cv2.imwrite("output_detections.jpg", annotated)
     print("Saved: output_detections.jpg")
+
+def to_tracker_format(detections: list[dict]) -> list:
+    """
+    Convert detect.py dict output to the tuple format expected by tracker.py.
+    tracker.py expects: ([x, y, w, h], confidence, class_label)
+    """
+    result = []
+    for d in detections:
+        x1, y1, x2, y2 = d["bbox"]
+        xywh = [x1, y1, x2 - x1, y2 - y1]
+        result.append((xywh, d["conf"], d["label"]))
+    return result
