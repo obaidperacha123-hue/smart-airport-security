@@ -4,10 +4,9 @@ from pathlib import Path
 
 # COCO class IDs for luggage items.
 # Using the base yolov8n.pt (COCO-pretrained) because best.pt was fine-tuned on
-# only ~50 images with a single generic "luggage" class and produces too many
+# only around 50 images with a single generic "luggage" class and produces too many
 # false positives (phones, jackets, etc.) in webcam conditions.
 # COCO classes 24/26/28 are well-trained on millions of images and are specific
-# enough not to confuse a phone or jacket with a backpack/handbag/suitcase.
 LUGGAGE_CLASSES = [24, 26, 28]   # 24=backpack, 26=handbag, 28=suitcase
 CLASS_NAMES     = {24: "backpack", 26: "handbag", 28: "suitcase"}
 COLOURS         = {24: (0, 128, 255), 26: (0, 200, 100), 28: (255, 80, 0)}
