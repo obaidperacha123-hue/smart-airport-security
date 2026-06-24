@@ -37,6 +37,7 @@ import os
 import tempfile
 import time
 import uuid
+from collections import deque
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -98,6 +99,9 @@ pipeline: Optional[CVPipeline] = None
 # Track open WebSocket sessions so /health can report connection count.
 active_connections: Dict[str, WebSocket] = {}
 
+# Rolling history of the last 100 alerts across all WebSocket sessions.
+alert_history: deque = deque(maxlen=100)
+
 
 # ── Lifecycle hooks ───────────────────────────────────────────────────────────
 
@@ -142,6 +146,23 @@ async def health_check() -> HealthResponse:
         face_db_count=face_db.count if face_db else 0,
         active_ws_connections=len(active_connections),
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /alerts  — recent alert history
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/alerts", tags=["Alerts"], summary="Get recent alert history")
+async def get_alerts() -> dict:
+    """Returns the last 100 alerts raised across all live sessions."""
+    return {"alerts": [a.model_dump() for a in alert_history]}
+
+
+@app.delete("/alerts", tags=["Alerts"], summary="Clear alert history")
+async def clear_alerts() -> dict:
+    """Wipe the in-memory alert history (does not affect the alert engine state)."""
+    alert_history.clear()
+    return {"success": True}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -208,6 +229,7 @@ async def websocket_live_feed(websocket: WebSocket) -> None:
                     frame,
                     frame_id,
                 )
+                alert_history.extend(result.alerts)
                 await websocket.send_text(result.model_dump_json())
             except Exception as exc:
                 logger.error(
@@ -483,6 +505,7 @@ async def enrol_person(
             continue
 
         face_db.enrol(name.lower(), embedding)
+        pipeline.sync_face_db()
         enrolled_count += 1
 
     if enrolled_count == 0:

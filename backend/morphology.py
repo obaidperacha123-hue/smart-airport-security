@@ -149,8 +149,8 @@ def visualise_morphology(frame: np.ndarray,
 # Saves the four morphology stages as separate images 
 if __name__ == "__main__":
     import sys
-    from enhance import enhance_frame
-    from detect  import detect_luggage
+    from enhancement import enhance_frame
+    from detection   import detect_luggage
 
     test_path = "test_frame.jpg"
     if not __import__("os").path.exists(test_path):

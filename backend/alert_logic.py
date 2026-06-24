@@ -77,7 +77,6 @@ class AlertEngine:
         new_alerts: list[Alert] = []
 
         # 1. Unattended bag (stationary + no owner info or owner absent)
-        absent_tids = {a["track_id"] for a in absent_alerts}
         for track in bag_tracks:
             tid = track["track_id"]
             if track["alert"]:
@@ -120,8 +119,8 @@ class AlertEngine:
         if self.detect_unknown_faces:
             for fr in face_results:
                 if fr["identity"] is None:
-                    # Use bbox as a pseudo-ID (no track_id for faces)
-                    pseudo_tid = hash(tuple(fr["bbox_ltrb"]))
+                    # Round bbox to nearest 30px so small jitter doesn't create duplicate alerts
+                    pseudo_tid = hash(tuple(round(v / 30) for v in fr["bbox_ltrb"]))
                     key = (pseudo_tid, "ACCESS_VIOLATION")
                     if key not in self._active:
                         alert = Alert(

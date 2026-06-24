@@ -164,16 +164,17 @@ function LiveCamera() {
       const y = box.y1 * scaleY;
       const width = (box.x2 - box.x1) * scaleX;
       const height = (box.y2 - box.y1) * scaleY;
+      const mx = canvas.width - x - width;
 
       context.strokeStyle = track.is_alert ? "red" : "#38bdf8";
       context.lineWidth = 3;
-      context.strokeRect(x, y, width, height);
+      context.strokeRect(mx, y, width, height);
 
       context.fillStyle = track.is_alert ? "red" : "#38bdf8";
       context.font = "16px Arial";
       context.fillText(
         `${track.class_name} ID: ${track.track_id}`,
-        x,
+        mx,
         y - 8
       );
     });
@@ -185,14 +186,15 @@ function LiveCamera() {
       const y = box.y1 * scaleY;
       const width = (box.x2 - box.x1) * scaleX;
       const height = (box.y2 - box.y1) * scaleY;
+      const mx = canvas.width - x - width;
 
       context.strokeStyle = face.is_authorized ? "#22c55e" : "#f97316";
       context.lineWidth = 3;
-      context.strokeRect(x, y, width, height);
+      context.strokeRect(mx, y, width, height);
 
       context.fillStyle = face.is_authorized ? "#22c55e" : "#f97316";
       context.font = "16px Arial";
-      context.fillText(face.name, x, y - 8);
+      context.fillText(face.name, mx, y - 8);
     });
   }
 
@@ -246,7 +248,6 @@ function LiveCamera() {
                 width: "760px",
                 height: "auto",
                 pointerEvents: "none",
-                transform: "scaleX(-1)",
               }}
             />
           </div>

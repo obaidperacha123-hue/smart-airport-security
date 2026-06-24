@@ -1,7 +1,25 @@
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+
+const API_URL = "http://localhost:8000";
 
 function Home() {
   const navigate = useNavigate();
+  const [backendStatus, setBackendStatus] = useState("CHECKING");
+
+  useEffect(() => {
+    async function checkBackend() {
+      try {
+        const res = await fetch(`${API_URL}/health`);
+        setBackendStatus(res.ok ? "ONLINE" : "OFFLINE");
+      } catch {
+        setBackendStatus("OFFLINE");
+      }
+    }
+    checkBackend();
+    const timer = setInterval(checkBackend, 5000);
+    return () => clearInterval(timer);
+  }, []);
 
   return (
     <div style={{ padding: "45px" }}>
@@ -82,7 +100,11 @@ function Home() {
 
           <div style={statusRow}>
             <span>Backend AI</span>
-            <span style={{ color: "#f59e0b" }}>PENDING</span>
+            <span style={{
+              color: backendStatus === "ONLINE" ? "#22c55e" : backendStatus === "CHECKING" ? "#f59e0b" : "#ef4444"
+            }}>
+              {backendStatus}
+            </span>
           </div>
         </div>
       </div>

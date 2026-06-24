@@ -11,26 +11,28 @@ responds correctly even when a teammate's module hasn't been pushed yet.
 When a module is missing, its step is a no-op pass-through, and a warning
 is logged once at startup.
 
-Integration contract (what D expects from B & C)
+Integration contract (actual module APIs)
 ─────────────────────────────────────────────────
 Member B:
   enhancement.py      → enhance_frame(frame: np.ndarray) -> np.ndarray
-  detection.py        → detect_objects(frame: np.ndarray) -> List[dict]
-                          dict keys: "class_name", "confidence", "bbox" [x1,y1,x2,y2]
-  morphology.py       → clean_mask(mask: np.ndarray) -> np.ndarray   (optional)
+  detection.py        → detect_luggage(frame: np.ndarray) -> List[dict]
+                          dict keys: "bbox" [x1,y1,x2,y2], "conf", "class", "label"
 
 Member C:
-  tracker.py          → class DeepSORTTracker
-                        update_tracks(tracker, detections, frame) -> List[dict]
-                          dict keys: "id", "class_name", "confidence",
-                                     "bbox" [x1,y1,x2,y2], "stationary_seconds"
+  tracker.py          → class BagTracker
+                        .update(frame, detections) -> List[dict]
+                          detections format: [([x,y,w,h], conf, class_name), ...]
+                          output dict keys: "track_id", "bbox_ltrb" [x1,y1,x2,y2],
+                                           "stationary_seconds", "alert"
   face_recognition_module.py
-                      → class InsightFaceMatcher
-                        .detect_and_match(frame, face_db) -> List[dict]
-                          dict keys: "name", "confidence", "bbox", "is_authorized"
-                        .extract_embedding(image) -> np.ndarray | None
-  alert_logic.py      → class AlertEngine(stationary_threshold_seconds)
-                        .evaluate(tracks, faces, frame) -> List[AlertEvent]
+                      → class FaceRecognizer
+                        .load_db() -> None
+                        .process_frame(frame, bag_tracks) -> List[dict]
+                          output dict keys: "bbox_ltrb", "identity", "similarity"
+                        .get_owner_absent_alerts() -> List[dict]
+  alert_logic.py      → class AlertEngine
+                        .process(bag_tracks, face_results, absent_alerts) -> List[Alert]
+                          Alert is a dataclass (converted to AlertEvent here)
 """
 
 import base64
@@ -72,14 +74,6 @@ except ImportError:
     _DETECT_OK = False
     logger.warning("⚠  detection     (Member B) not found — no bounding boxes will be produced")
 
-try:
-    from morphology import clean_mask
-    _MORPH_OK = True
-    logger.info("✓  morphology    (Member B) loaded")
-except ImportError:
-    _MORPH_OK = False
-    # Morphology is optional (5th capability) — no warning needed
-
 # ── Member C — import with graceful fallback ──────────────────────────────────
 
 try:
@@ -107,7 +101,7 @@ except ImportError:
     logger.warning("⚠  alert_engine  (Member C) not found — using built-in fallback alerts")
 
 # Threshold (seconds) before a stationary bag triggers an alert
-STATIONARY_THRESHOLD = 30.0
+STATIONARY_THRESHOLD = 10.0
 
 
 class CVPipeline:
@@ -124,10 +118,13 @@ class CVPipeline:
         self._frame_counter = 0
 
         # Stateful CV modules (instantiated once, reused across frames)
-        self.tracker = BagTracker() if _TRACK_OK else None
-        self.face_matcher = FaceRecognizer() if _FACE_OK else None
-        self.alert_engine = AlertEngine(    
-        ) if _ALERT_OK else None
+        self.tracker = BagTracker(stationary_threshold=STATIONARY_THRESHOLD) if _TRACK_OK else None
+        if _FACE_OK:
+            self.face_matcher = FaceRecognizer()
+            self.face_matcher.load_db()
+        else:
+            self.face_matcher = None
+        self.alert_engine = AlertEngine() if _ALERT_OK else None
 
         logger.info("CVPipeline ready")
 
@@ -161,37 +158,57 @@ class CVPipeline:
     # ─────────────────────────────────────────────────────────────────────────
     # Step 3  —  Object Tracking  (Member C)
     # ─────────────────────────────────────────────────────────────────────────
-    def _track(self, detections: list, frame: np.ndarray) -> List[TrackedObject]:
+    def _track(self, detections: list, frame: np.ndarray):
         """
-        DeepSORT assigns persistent track IDs and accumulates a stationary timer.
-        Converts raw dicts → TrackedObject Pydantic models.
+        BagTracker assigns persistent IDs and accumulates a stationary timer.
+        Returns (List[TrackedObject], raw_tracks) so _match_faces and _check_alerts
+        can pass the raw dicts directly to their respective modules.
         """
         if _TRACK_OK and self.tracker is not None:
             try:
-                raw = self.tracker.update(frame, detections)
-                return [
+                # BagTracker.update() expects list of ([x,y,w,h], conf, class_name) tuples.
+                # detect_luggage() returns dicts with xyxy bbox, so convert here.
+                tracker_input = []
+                for d in detections:
+                    x1, y1, x2, y2 = d["bbox"]
+                    tracker_input.append(([x1, y1, x2 - x1, y2 - y1], d["conf"], d["label"]))
+
+                raw_tracks = self.tracker.update(frame, tracker_input)
+                # BagTracker output keys: "track_id", "bbox_ltrb", "stationary_seconds", "alert"
+                pydantic_tracks = [
                     TrackedObject(
-                        track_id=t["id"],
-                        class_name=t.get("class_name", "object"),
-                        confidence=t.get("confidence", 0.0),
+                        track_id=t["track_id"],
+                        class_name="object",
+                        confidence=0.0,
                         bbox=BoundingBox(
-                            x1=t["bbox"][0], y1=t["bbox"][1],
-                            x2=t["bbox"][2], y2=t["bbox"][3],
+                            x1=t["bbox_ltrb"][0], y1=t["bbox_ltrb"][1],
+                            x2=t["bbox_ltrb"][2], y2=t["bbox_ltrb"][3],
                         ),
                         stationary_seconds=t.get("stationary_seconds", 0.0),
-                        is_alert=t.get("stationary_seconds", 0.0) >= STATIONARY_THRESHOLD,
+                        is_alert=t.get("alert", False),
                     )
-                    for t in raw
+                    for t in raw_tracks
                 ]
+                return pydantic_tracks, raw_tracks
             except Exception as exc:
                 logger.error(f"update_tracks failed: {exc}")
 
-        # Fallback: treat each raw detection as a pseudo-track (no persistent ID)
-        return [
+        # Fallback: treat each detection as a pseudo-track with no persistent ID.
+        # detection.py keys: "bbox" [x1,y1,x2,y2], "conf", "label"
+        raw_tracks = [
+            {
+                "track_id": -1,
+                "bbox_ltrb": d["bbox"],
+                "stationary_seconds": 0.0,
+                "alert": False,
+            }
+            for d in detections
+        ]
+        pydantic_tracks = [
             TrackedObject(
                 track_id=-1,
-                class_name=d.get("class_name", "object"),
-                confidence=d.get("confidence", 0.0),
+                class_name=d.get("label", "object"),
+                confidence=d.get("conf", 0.0),
                 bbox=BoundingBox(
                     x1=d["bbox"][0], y1=d["bbox"][1],
                     x2=d["bbox"][2], y2=d["bbox"][3],
@@ -201,33 +218,37 @@ class CVPipeline:
             )
             for d in detections
         ]
+        return pydantic_tracks, raw_tracks
 
     # ─────────────────────────────────────────────────────────────────────────
     # Step 4  —  Face Recognition  (Member C)
     # ─────────────────────────────────────────────────────────────────────────
-    def _match_faces(self, frame: np.ndarray) -> List[FaceMatch]:
+    def _match_faces(self, frame: np.ndarray, raw_tracks: list):
         """
         InsightFace detects faces, then matches each embedding against the
-        enrolled face DB.  Returns [] when module is unavailable.
+        enrolled face DB. Returns (List[FaceMatch], raw_faces) so _check_alerts
+        can forward the raw dicts to AlertEngine.
+        FaceRecognizer output keys: "bbox_ltrb", "identity", "similarity"
         """
         if _FACE_OK and self.face_matcher is not None:
             try:
-                raw = self.face_matcher.detect_and_match(frame, self.face_db)
-                return [
+                raw_faces = self.face_matcher.process_frame(frame, raw_tracks)
+                pydantic_faces = [
                     FaceMatch(
-                        name=f.get("name", "Unknown"),
-                        confidence=f.get("confidence", 0.0),
+                        name=f.get("identity") or "Unknown",
+                        confidence=f.get("similarity", 0.0),
                         bbox=BoundingBox(
-                            x1=f["bbox"][0], y1=f["bbox"][1],
-                            x2=f["bbox"][2], y2=f["bbox"][3],
+                            x1=f["bbox_ltrb"][0], y1=f["bbox_ltrb"][1],
+                            x2=f["bbox_ltrb"][2], y2=f["bbox_ltrb"][3],
                         ),
-                        is_authorized=f.get("is_authorized", False),
+                        is_authorized=f.get("identity") is not None,
                     )
-                    for f in raw
+                    for f in raw_faces
                 ]
+                return pydantic_faces, raw_faces
             except Exception as exc:
-                logger.error(f"face detect_and_match failed: {exc}")
-        return []
+                logger.error(f"face process_frame failed: {exc}")
+        return [], []
 
     # ─────────────────────────────────────────────────────────────────────────
     # Step 5  —  Alert Logic  (Member C, with D's fallback)
@@ -235,19 +256,57 @@ class CVPipeline:
     def _check_alerts(
         self,
         tracks: List[TrackedObject],
-        faces: List[FaceMatch],
+        raw_tracks: list,
+        raw_faces: list,
         frame: np.ndarray,
     ) -> List[AlertEvent]:
         """
         Delegate to Member C's AlertEngine when available.
+        AlertEngine.process() expects raw track/face dicts, not Pydantic models.
+        Its Alert dataclass return values are converted to AlertEvent here.
         Built-in fallback: raise UNATTENDED_BAG when any track is stationary
         beyond the threshold — covers the core demo scenario.
         """
+        _ALERT_TYPE_MAP = {
+            "UNATTENDED_BAG": AlertType.UNATTENDED_BAG,
+            "OWNER_LEFT": AlertType.OWNER_LEFT_SCENE,
+            "ACCESS_VIOLATION": AlertType.UNAUTHORIZED_ACCESS,
+        }
         if _ALERT_OK and self.alert_engine is not None:
             try:
-                return self.alert_engine.process(tracks, faces, [])
+                absent_alerts = (
+                    self.face_matcher.get_owner_absent_alerts()
+                    if _FACE_OK and self.face_matcher is not None
+                    else []
+                )
+                raw_alerts = self.alert_engine.process(raw_tracks, raw_faces, absent_alerts)
+                result: List[AlertEvent] = []
+                for a in raw_alerts:
+                    bbox_ltrb = getattr(a, "bbox_ltrb", [])
+                    thumbnail = None
+                    if len(bbox_ltrb) == 4:
+                        thumbnail = _crop_b64(
+                            frame,
+                            BoundingBox(
+                                x1=bbox_ltrb[0], y1=bbox_ltrb[1],
+                                x2=bbox_ltrb[2], y2=bbox_ltrb[3],
+                            ),
+                        )
+                    duration = getattr(a, "stationary_seconds", 0.0) or getattr(a, "absent_seconds", 0.0)
+                    result.append(
+                        AlertEvent(
+                            alert_id=str(uuid.uuid4()),
+                            alert_type=_ALERT_TYPE_MAP.get(a.alert_type, AlertType.UNATTENDED_BAG),
+                            track_id=getattr(a, "track_id", None),
+                            timestamp=getattr(a, "timestamp", time.time()),
+                            duration_seconds=duration,
+                            message=f"{a.alert_type} — track {getattr(a, 'track_id', '?')}",
+                            thumbnail_b64=thumbnail,
+                        )
+                    )
+                return result
             except Exception as exc:
-                logger.error(f"alert_engine.evaluate failed: {exc}")
+                logger.error(f"alert_engine.process failed: {exc}")
 
         # ── Built-in fallback ──
         alerts: List[AlertEvent] = []
@@ -289,11 +348,11 @@ class CVPipeline:
             self._frame_counter += 1
             frame_id = self._frame_counter
 
-        enhanced  = self._enhance(frame)
-        detections = self._detect(enhanced)
-        tracks    = self._track(detections, enhanced)
-        faces     = self._match_faces(enhanced)
-        alerts    = self._check_alerts(tracks, faces, enhanced)
+        enhanced           = self._enhance(frame)
+        detections         = self._detect(enhanced)
+        tracks, raw_tracks = self._track(detections, enhanced)
+        faces, raw_faces   = self._match_faces(enhanced, raw_tracks)
+        alerts             = self._check_alerts(tracks, raw_tracks, raw_faces, enhanced)
 
         # Send an enhanced preview frame every 5 frames to reduce bandwidth
         preview_b64 = _frame_to_b64(enhanced) if (frame_id % 5 == 0) else None
@@ -307,6 +366,15 @@ class CVPipeline:
             enhanced_frame_b64=preview_b64,
         )
 
+    def sync_face_db(self) -> None:
+        """
+        Reload FaceRecognizer's in-memory enrolled DB from disk.
+        Call this after face_db.enrol() so the recognizer picks up new faces
+        immediately without requiring a server restart.
+        """
+        if _FACE_OK and self.face_matcher is not None:
+            self.face_matcher.load_db()
+
     def get_embedding_for_enrol(self, image: np.ndarray) -> Optional[np.ndarray]:
         """
         Extract a single ArcFace embedding from a reference enrolment image.
@@ -315,7 +383,11 @@ class CVPipeline:
         """
         if _FACE_OK and self.face_matcher is not None:
             try:
-                return self.face_matcher.extract_embedding(image)
+                # FaceRecognizer exposes the InsightFace app via ._app
+                faces = self.face_matcher._app.get(image)
+                if faces:
+                    face = max(faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
+                    return face.normed_embedding
             except Exception as exc:
                 logger.error(f"extract_embedding failed: {exc}")
         logger.warning("Face recognition unavailable — cannot extract embedding for enrolment")
