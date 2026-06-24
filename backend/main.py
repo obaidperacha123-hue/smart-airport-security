@@ -420,7 +420,7 @@ def _build_summary(results: List[FrameResult]) -> dict:
 
     for r in results:
         for t in r.tracks:
-            if t.track_id != -1:
+            if True:
                 unique_track_ids.add(t.track_id)
         for f in r.faces:
             if f.name.lower() not in ("unknown", ""):
@@ -429,7 +429,7 @@ def _build_summary(results: List[FrameResult]) -> dict:
             alert_counts[a.alert_type] = alert_counts.get(a.alert_type, 0) + 1
 
     return {
-        "unique_tracked_objects": len(unique_track_ids),
+        "unique_tracked_objects": sum(len(r.tracks) for r in results),
         "unique_persons_identified": len(unique_persons),
         "alert_breakdown": alert_counts,
         "frames_with_alerts": sum(1 for r in results if r.alerts),
