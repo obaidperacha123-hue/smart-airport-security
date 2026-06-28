@@ -307,7 +307,7 @@ async def upload_file(file: UploadFile = File(...)) -> UploadResponse:
             processed_frames=total,
             duration_seconds=round(time.time() - start_ts, 3),
             alerts=result.alerts,
-            summary=_build_summary([result]),
+            summary={**_build_summary([result]), "frame_b64": result.enhanced_frame_b64},
         )
 
     # ── Video ─────────────────────────────────────────────────────────────────

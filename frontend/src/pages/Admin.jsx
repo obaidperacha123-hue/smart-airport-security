@@ -1,87 +1,159 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 const API_URL = "http://localhost:8000";
 
 function Admin() {
   const [name, setName] = useState("");
-  const [faceImage, setFaceImage] = useState(null);
-  const [status, setStatus] = useState("No person enrolled yet");
+  const [image, setImage] = useState(null);
+  const [status, setStatus] = useState("");
+  const [enrolled, setEnrolled] = useState([]);
+
+  useEffect(() => {
+    fetchEnrolled();
+  }, []);
+
+  async function fetchEnrolled() {
+    try {
+      const res = await fetch(`${API_URL}/enrol`);
+      const data = await res.json();
+      setEnrolled(Object.entries(data.persons || {}));
+    } catch {
+      setEnrolled([]);
+    }
+  }
 
   async function handleEnrol() {
-    if (!name || !faceImage) {
-      setStatus("Please enter name and upload face image");
+    if (!name.trim()) {
+      setStatus("Please enter a name.");
       return;
     }
-
+    if (!image) {
+      setStatus("Please select a photo.");
+      return;
+    }
     const formData = new FormData();
-    formData.append("name", name);
-    formData.append("images", faceImage);
-
+    formData.append("name", name.trim());
+    formData.append("images", image);
     try {
-      setStatus("Sending enrolment data to backend...");
-
-      const response = await fetch(`${API_URL}/enrol`, {
+      setStatus("Enrolling...");
+      const res = await fetch(`${API_URL}/enrol`, {
         method: "POST",
         body: formData,
       });
-
-      if (!response.ok) {
-        throw new Error("Enrolment failed");
+      const data = await res.json();
+      if (data.success) {
+        setStatus(`✅ Successfully enrolled "${data.name}"!`);
+        setName("");
+        setImage(null);
+        fetchEnrolled();
+      } else {
+        setStatus("❌ Enrolment failed. Make sure the photo shows a clear face.");
       }
+    } catch {
+      setStatus("❌ Could not connect to backend.");
+    }
+  }
 
-      const data = await response.json();
-      console.log(data);
-
-      setStatus(`${name} enrolled successfully.`);
-    } catch (error) {
-      setStatus("Backend not connected yet. Enrolment data is ready.");
+  async function handleDelete(personName) {
+    try {
+      const res = await fetch(`${API_URL}/enrol/${personName}`, { method: "DELETE" });
+      const data = await res.json();
+      if (data.success) {
+        setStatus(`🗑 Removed "${personName}" from database.`);
+        fetchEnrolled();
+      }
+    } catch {
+      setStatus("❌ Could not delete person.");
     }
   }
 
   return (
     <div style={{ padding: "40px" }}>
-      <div className="card">
-        <h1>Admin Face Enrolment</h1>
 
+      {/* Enrol Form */}
+      <div className="card" style={{ marginBottom: "30px" }}>
+        <h1>Face Enrolment</h1>
         <p style={{ color: "#94a3b8" }}>
-          Upload reference face images for authorised personnel or travellers.
+          Register authorised airport staff into the face recognition database.
         </p>
 
-        <input
-          type="text"
-          placeholder="Enter Person Name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
+        <div style={{ marginTop: "20px" }}>
+          <label style={{ color: "#94a3b8", fontSize: "14px" }}>Full Name</label>
+          <br />
+          <input
+            type="text"
+            placeholder="e.g. John Smith"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            style={{
+              marginTop: "8px", padding: "10px", width: "100%",
+              borderRadius: "8px", border: "1px solid #334155",
+              background: "#1e293b", color: "white", fontSize: "14px"
+            }}
+          />
+        </div>
 
-        <br />
-        <br />
+        <div style={{ marginTop: "20px" }}>
+          <label style={{ color: "#94a3b8", fontSize: "14px" }}>
+            Reference Photo (clear front-facing photo)
+          </label>
+          <br />
+          <input
+            type="file"
+            accept="image/*"
+            onChange={(e) => setImage(e.target.files[0])}
+            style={{ marginTop: "8px" }}
+          />
+        </div>
 
-        <input
-          type="file"
-          accept="image/*"
-          onChange={(e) => {
-            setFaceImage(e.target.files[0]);
-            setStatus("Face image selected and ready for enrolment");
-          }}
-        />
-
-        <br />
-        <br />
-
-        {faceImage && (
-          <div className="card" style={{ marginTop: "20px" }}>
-            <h3>Selected Face Image</h3>
-            <p>{faceImage.name}</p>
+        {image && (
+          <div style={{ marginTop: "15px" }}>
+            <img
+              src={URL.createObjectURL(image)}
+              alt="preview"
+              style={{ width: "150px", height: "150px", objectFit: "cover", borderRadius: "8px", border: "2px solid #0d9488" }}
+            />
           </div>
         )}
 
-        <br />
+        <button onClick={handleEnrol} style={{ marginTop: "20px" }}>
+          Enrol Person
+        </button>
 
-        <button onClick={handleEnrol}>Enrol Person</button>
-
-        <p style={{ marginTop: "20px", color: "#38bdf8" }}>{status}</p>
+        {status && (
+          <p style={{ marginTop: "15px", color: status.includes("✅") ? "#22c55e" : status.includes("❌") ? "#ef4444" : "#38bdf8" }}>
+            {status}
+          </p>
+        )}
       </div>
+
+      {/* Enrolled Persons List */}
+      <div className="card">
+        <h2>Enrolled Persons</h2>
+        <p style={{ color: "#94a3b8" }}>
+          {enrolled.length === 0 ? "No persons enrolled yet." : `${enrolled.length} person(s) in the database.`}
+        </p>
+
+        {enrolled.map(([personName, count]) => (
+          <div key={personName} style={{
+            display: "flex", justifyContent: "space-between", alignItems: "center",
+            padding: "12px 16px", marginTop: "10px",
+            background: "#1e293b", borderRadius: "8px", border: "1px solid #334155"
+          }}>
+            <div>
+              <p style={{ color: "white", fontWeight: "bold", margin: 0, textTransform: "capitalize" }}>{personName}</p>
+              <p style={{ color: "#94a3b8", fontSize: "12px", margin: 0 }}>{count} embedding(s) stored</p>
+            </div>
+            <button
+              onClick={() => handleDelete(personName)}
+              style={{ background: "#ef4444", padding: "6px 14px", fontSize: "12px" }}
+            >
+              Remove
+            </button>
+          </div>
+        ))}
+      </div>
+
     </div>
   );
 }
