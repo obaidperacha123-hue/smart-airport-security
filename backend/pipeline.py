@@ -357,15 +357,16 @@ class CVPipeline:
         # Send an enhanced preview frame every 5 frames to reduce bandwidth
         annotated = enhanced.copy()
         for t in tracks:
-           x1, y1, x2, y2 = int(t.bbox.x1), int(t.bbox.y1), int(t.bbox.x2), int(t.bbox.y2)
-           cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 255), 2)
-           label = f"luggage {t.confidence:.2f}" if t.confidence > 0 else "luggage"
-           cv2.putText(annotated, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+               x1, y1, x2, y2 = int(t.bbox.x1), int(t.bbox.y1), int(t.bbox.x2), int(t.bbox.y2)
+               cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 255), 2)
+               label = f"luggage {t.confidence:.2f}" if t.confidence > 0 else "luggage"
+               cv2.putText(annotated, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
         for f in faces:
-           x1, y1, x2, y2 = int(f.bbox.x1), int(f.bbox.y1), int(f.bbox.x2), int(f.bbox.y2)
-           cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 2)
-           cv2.putText(annotated, f.name, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+               x1, y1, x2, y2 = int(f.bbox.x1), int(f.bbox.y1), int(f.bbox.x2), int(f.bbox.y2)
+               cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 2)
+               cv2.putText(annotated, f.name, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
         preview_b64 = _frame_to_b64(annotated)
+        
 
         return FrameResult(
             frame_id=frame_id,
